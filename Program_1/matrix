@@ -1,0 +1,380 @@
+#!/bin/bash
+
+#Author: Lachlan Sinclair
+#Date:7/3/2019 
+#Description: performs various operations on matricies
+
+#rows/col number for the first matrix
+rows=0
+cols=0
+
+#row/col number for the second matrix if needed
+rows2=0
+cols2=0
+
+#variable that holds the temporary file used for the transpose function
+holder="transposeFile$$"
+
+#variable that holds the name of the temp file used by the mean function
+holderMean="meanFile$$"
+
+#variable that holds the name of the temp file used by the add function
+holderAdd="addFile$$"
+
+#variable that holds the name of the temp file used by the multiply function
+holderMul="mulFile$$"
+
+#used by getVal, it holds the value at the given address
+curVal=0
+
+#used to hold values from the rounding fucntion
+rounded=0
+
+#variable to hold the errror status
+errVal=1
+
+#$1 is the numerator, $2 is the denominator
+rounding(){
+	if [ $1 -lt 0 ]
+	then
+		rounded=$(( ( $1 - ( $2 / 2 )) / $2 ))
+	
+	else
+		rounded=$(( ($1 + ($2 / 2)) / $2 ))
+	fi
+
+
+}
+
+#$1 is the file, $2 determines which matrix values to save the results to
+#0 is the first matrix, 1 is the second matrix
+dims(){
+	#make sure one arguement was passed, and it is a readable file
+	if [ "$#" -ne 1 ] || [ ! -r $1 ]; 
+	then
+		>&2 echo "to many arguements"
+		errVal=1
+		return
+	fi
+	
+	#set a equal to the result of running the wc command
+	a=($(wc $1))
+	#set rows equal to the rows value returned by wc
+	rows=${a[0]}
+	#set a variable as the total number of words
+	numOfWords=${a[1]}
+	#divide the number of words by rows to get the columns
+	cols=$(( numOfWords/rows ))
+	#display the results
+	echo "$rows $cols"
+	#code executed properly
+	errVal=0
+}
+
+#dims $1 0
+#internal version of dims, doesnt display anything to the console
+dimension(){
+	
+	a=($(wc $1))
+	if [ $2 -eq 0 ]
+	then
+		
+		rows=${a[0]}
+		numOfWords=${a[1]}
+		cols=$(( numOfWords/rows ))
+	else
+		rows2=${a[0]}
+		numOfWords=${a[1]}
+		cols2=$(( numOfWords/rows2 ))
+	fi 
+	errVal=0
+}
+
+#This function is used to grab a specific element from a file containing a matrix
+#$1 is the file
+#$2 is the row
+#$3 is the col
+getVal()
+{
+	#select the row, by using the head command to select all the rows up 
+	#to the point of desired row and pipe that to the tail command to select
+	#the last row, which is the row we want
+	tempRow=$( head -n$2 $1 | tail -n1 )
+	#count val keeps track of which column we are currently in
+	countVal=1
+	#loop through all of the columns
+	for i in $tempRow
+	do
+		#once we are in the right column set curVal to the specific element
+		if [ $countVal -eq $3 ]
+		then
+			curVal=$i
+			break;
+		fi
+		#increment countVal to keep track of the column
+		((countVal++))
+	done
+}
+#Calculates the mean of each column in a matrix
+#$1 is the file
+mean(){
+	#make sure only one arguements was passed, and that it is a readable file
+	if [ "$#" != "1" ] || [ ! -r $1 ];
+	then
+		>&2 echo "invalid arguements"
+		return
+	fi
+	#y is used to iterate through the columns
+	y=1
+	#set the dimension variables to represent the given matrix
+	dimension $1 0
+	#create the temp file
+	touch $holderMean
+	#create the string that represents the results
+	stringTemp=""
+	#loop through the columns
+	while [ $y -le $cols ]
+	do
+		#x is used to keep track of the rows
+		x=1
+		sum=0
+		while [ $x -le $rows ]
+		do
+			#use the getVal method to retrive the value at coord x, y
+			getVal $1 $x $y	
+#			#add the retrived value to sum
+			sum=`expr $sum + $curVal`
+			#increment x
+			x=`expr $x + 1`
+		done
+		#call the rounding function using the sum and number of rows
+		rounding $sum $rows
+		mean=$rounded
+		
+		#and this columns mean to the string
+		stringTemp="$stringTemp$mean\t"
+		
+		y=`expr $y + 1`
+	done
+	#cut the last \t from the string so it is formatted properly
+	stringTemp=${stringTemp%??}
+	#echo out the string using -e so the \t is read as a tab
+	echo -e  "$stringTemp" > "$holderMean"
+	#cat out the file, now that I think about it I didnt need the file at all
+	cat  $holderMean
+	rm -f $holderMean
+	#if code reaches this point no errors were found
+	errVal=0
+}
+
+
+#transpose the given file
+#$1 is the file
+transpose(){
+	
+	col=1
+
+	if [ "$#" -ne 1 ] || [ ! -r $1 ]; 
+	then
+		>&2 echo "to many arguements"
+		errVal=1
+		return
+	fi
+	#set the dimensions for the given matrix
+ 	dimension $1 0
+	#create the temp file
+	touch  $holder
+	#loop through all of the columns
+	while [ $col -le $cols ] 
+	do
+		row=1
+		stringTemp=""
+		#loop through all of the rows, this loop takes all of the elements
+		#in a column and writes them into a string as a row
+		while [ $row -le $rows ]
+		do
+			#get the value at the given row/col
+			getVal $1 $row $col
+			#append that value to the string
+			stringTemp="$stringTemp$curVal\t"
+			((row++))
+
+		done
+	((col++))
+	#take the last \t off of the string
+	stringTemp=${stringTemp%??}
+	#add the row to the temp file
+	echo -e "$stringTemp"  >> "$holder"	
+	done
+	#write the file to stdout
+	cat  $holder
+	rm -f $holder
+	errVal=0
+
+}
+
+#$1 is the first file
+#$2 is the second file
+add(){
+	row=1
+	#calculate and store the dimensions for the two matricies
+	dimension $1 0
+	dimension $2 1
+	
+	if [ "$cols" -ne "$cols2" ] || [ "$rows" -ne "$rows2" ] || [ "$#" -ne 2 ]; 
+	then
+		>&2 echo "mismatched dimensions"
+		errVal=1
+		return
+	fi
+	#create the tempfile
+	touch  $holderAdd
+	#loop through the rows of both files
+	while [ $row -le $rows ] 
+	do
+		col=1
+		stringTemp=""
+		
+		#loop through the columns of both files
+		while [ $col -le $cols ]
+		do
+			#get value from first matrix
+			getVal $1 $row $col
+			temp1=$curVal
+
+			#get value from secnod matrix
+			getVal $2 $row $col
+			
+			#add the two values and append the result to the string
+			summation=$(($temp1+$curVal))
+			stringTemp="$stringTemp$summation\t"
+			
+			((col++))
+		done
+		((row++))
+		#remove the last \t from the string
+		stringTemp=${stringTemp%??}
+		#add the row to the file
+		echo -e "$stringTemp"  >> "$holderAdd"	
+	done
+	#echo "out of loop"
+	cat $holderAdd
+	rm -f $holderAdd	
+	errVal=0
+
+}
+
+#$1 is the first matrix
+#$2 is the second matrix
+multiply(){
+
+	row1=1
+	#calculate and store the dimensions for both matricies
+	dimension $1 0
+	dimension $2 1
+	
+	if [ "$cols" -ne "$rows2" ]; 
+	then
+		>&2 echo "mismatched dimensions"
+		errVal=1
+		return
+	fi
+
+
+	touch $holderMul
+	#loop through the rows of the first matrix
+	while [ $row1 -le $rows ]
+	do
+		col2=1
+		stringTemp=""
+		#loop through the columns of the second matrix
+		while [ $col2 -le $cols2 ]
+		do
+			#current is used to track the index for both the column of
+			#the first matrix and the row of the second matrix
+			current=1
+			#sum tracks the value for this specific row/col pair
+			sumTotal=0
+
+			#loop through the required values in matrix 1s row, and matrix 2s
+			#column
+			while [ $current -le $cols ]
+			do
+				#get from first matrix
+				getVal $1 $row1 $current
+				firstVal=$curVal
+
+				#get from second matrix
+				getVal $2 $current $col2
+				secondVal=$curVal
+				#multiply the two values then add it to the sum	
+				tempTotal=$(($firstVal*$secondVal))
+				sumTotal=$(($sumTotal+$tempTotal))
+
+				((current++))	
+			done
+			#add the total for this row/col pair to the current row in the
+			#resulting matrix
+			stringTemp="$stringTemp$sumTotal\t"
+
+			((col2++))
+		done
+		#take of the last \t on the given line
+		stringTemp=${stringTemp%??}
+		#write the finsished row to the temp file
+		echo -e "$stringTemp" >> "$holderMul"
+	        ((row1++))	
+	done
+	#display the temp file
+	cat $holderMul
+	rm -f $holderMul
+	errVal=0
+}
+
+#This is the main method of my script
+
+#make sure the user passed in one of the valid operations
+if [ "$1" != "dims" ] && [ "$1" != "transpose" ] &&[ "$1" != "mean" ] &&[ "$1" != "add" ] &&
+[ "$1" != "multiply" ];
+then
+	>&2 echo "not a valid operation"
+	exit 1
+fi
+
+#check if there are only two arguements, if there are check if the second is a file, if it is make
+#sure it is a readable file
+if [ "$#" -eq "2" ];
+then
+	if [ -e "$2" ]
+	then
+		if [ ! -r "$2" ]
+		then
+			>&2 echo "file is not readable"
+			exit 1
+		fi
+	fi
+fi
+
+#this section makes sure add and multiply recieve 2 readable files are arguements
+if [ "$1" == "add" ] || [ "$1" == "multiply" ]
+then
+	if [ "$#" != "3" ] || [ ! -e "$2" ] || [ ! -e "$3" ]
+	then
+		>&2 echo "arguements are not valid"
+		exit 1
+	fi
+fi
+
+data="data$$"
+#if only one arguement was passed(just the operation) try to cat in data to a file
+if [ "$#" = "1" ]
+then
+	cat>"$data"
+	$1 "$data"
+else
+	#for all other cases pass the arguements to the function desired
+	$1 "${@:2}" 
+fi
+#remove the temp and exit with the status
+rm -f $data
+exit $errVal
